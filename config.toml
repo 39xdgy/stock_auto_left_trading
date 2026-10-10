@@ -6,7 +6,7 @@
 [run]
 # "observe": decide() still produces actions, but they are only journaled, never sent to the broker.
 # "live":    actions are executed through the Robinhood connector (see docs/RUNBOOK.md).
-mode = "observe"
+mode = "live"
 
 [account]
 position_size_usd = 1500      # per trade; plan is to raise to 3000 after 1-2 clean weeks
