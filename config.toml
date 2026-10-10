@@ -1,0 +1,67 @@
+# Strategy settings.
+# All clock times are US/Eastern (market time). Central time (CT) = ET - 1 hour.
+# Private values (account number) never go in this file: the repo is public.
+# Put them in config.local.toml (git-ignored), which overrides anything here.
+
+[run]
+# "observe": decide() still produces actions, but they are only journaled, never sent to the broker.
+# "live":    actions are executed through the Robinhood connector (see docs/RUNBOOK.md).
+mode = "observe"
+
+[account]
+position_size_usd = 1500      # per trade; plan is to raise to 3000 after 1-2 clean weeks
+min_shares = 1                # buy at least this many shares even if one share costs more (SNDK ~ $1,600)
+max_positions = 2             # simultaneous open positions; set to 1 when position_size_usd = 3000
+                              # (live orders are also capped by buying power)
+max_daily_loss_usd = 100      # stop opening new positions once today's realized P&L <= -this
+
+[symbols]
+watchlist = ["AAOI", "SNDK", "ASTS"]
+
+[entry]
+# strict = MACD golden cross + RSI < rsi_max + Stochastic %K and %D < stoch_max, all on the same 1-minute bar
+rule = "strict"
+rsi_period = 14
+rsi_max = 35
+stoch_k = 14
+stoch_smooth_k = 3
+stoch_d = 3
+stoch_max = 20
+macd_fast = 12
+macd_slow = 26
+macd_signal = 9
+macd_min_cross_margin = 0.0   # TODO: > 0 ignores crosses that barely clear the signal line
+limit_price = "ask"           # "ask" (from quotes) or "last_close"
+buy_order_ttl_minutes = 2     # cancel an unfilled buy order after this many minutes
+
+[exit.take_profit]
+enabled = true
+pct = 0.0083                  # fixed take-profit, resting limit order on the broker
+
+[exit.stop_loss]
+enabled = false               # decided 2026-10-10: no price stop (backtests were as good or better without)
+pct = 0.02                    # kept for later; not used while disabled
+
+[exit.dynamic]
+# Shadow only: the journal records what these exits WOULD have done. Never executed.
+enabled = false
+giveback = 0.5                # sell when the gain falls to half of the best gain since arming
+sell_on_kd_above = 80         # or when %K and %D are both above this
+floor_at_take_profit = false  # "3 conditions" variant: also sell if price falls back below the take-profit level
+
+[exit.end_of_day]
+flatten_time = "15:50"        # ET (14:50 CT): cancel take-profit orders and sell anything still open
+
+[schedule]
+first_entry_time = "09:31"    # ET
+last_entry_time = "15:45"     # ET; no new buys at or after this time
+skip_earnings_day = true
+
+[alerts]
+price_alert_pct = -0.03       # phone alert this far below entry; 0 disables
+
+[notifications]
+mode = "none"                 # TODO: "background_script" | "routine_api"
+
+[backtest]
+half_spread = 0.0005          # paid on entry and on market exits

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+
+# private settings (account number etc.) — this repo is public
+config.local.toml
+.env
+
+# runtime files
+state*.json
+journal/
+data/
