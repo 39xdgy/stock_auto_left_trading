@@ -1,3 +1,18 @@
+# Tighter slack / cross window, window rule (2026-10-11)
+
+Same backfill as below (main 55f1d86, fill_gaps=true, near_cross_bars=2, 32 trading days, 26 expected signals), scored with `analyze.py --rule window`. Each variant used a config copy changing only the `[watcher]` keys listed.
+
+| variant | caught (window) | missed | candidates | per day mean / max | near_cross=true |
+|---|---|---|---|---|---|
+| near2: slack 5, cross_window 2 (config) | 24/26 | 09-10 15:21 ASTS; 09-18 10:09 ASTS | 840 | 26.2 / 54 (2026-09-23) | 641 |
+| a: slack 0, cross_window 2 | 23/26 | 08-20 11:30 ASTS; 09-10 15:21 ASTS; 09-18 10:09 ASTS | 496 | 15.5 / 29 (2026-09-10) | 389 |
+| b: slack 2, cross_window 2 | 24/26 | 09-10 15:21 ASTS; 09-18 10:09 ASTS | 617 | 19.3 / 37 (2026-09-23) | 479 |
+| c: slack 0, cross_window 1 | 20/26 | 08-17 14:26 AAOI; 08-19 13:33 SNDK; 08-20 11:30 ASTS; 09-09 15:13 SNDK; 09-10 15:21 ASTS; 09-18 10:09 ASTS | 237 | 7.4 / 20 (2026-10-08) | 198 |
+
+Slack 2 keeps near2's recall (same two misses) with 27% fewer candidates. Slack 0 loses 2026-08-20 ASTS (nearest candidate 11:32, one bar late). cross_window = 1 cuts candidates by ~70% but loses 4 more signals.
+
+Files: `a_*.jsonl`, `b_*.jsonl`, `c_*.jsonl`.
+
 # Near-cross wake condition, window matching rule (2026-10-11)
 
 Backfill of `trader/live/watcher.py` on main (55f1d86, adds `near_cross_bars`), fill_gaps=true, slack 5, same 32 trading days and 26 expected signals. New rule (`analyze.py --rule window`): an expected signal at bar s is CAUGHT if a candidate for that symbol and day has bar_et in s-2..s+1 (Claude rechecks Robinhood at the candidate minute and up to 2 minutes after, each check looking at the last 2 completed bars).
