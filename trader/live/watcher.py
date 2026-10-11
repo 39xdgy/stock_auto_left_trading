@@ -5,8 +5,9 @@
     python -m trader.live.watcher --backfill 2026-10-09 2026-10-09   # list the candidates those days would have produced
 
 Each stdout line is one JSON event, and each one is meant to wake Claude (Monitor tool):
-  CANDIDATE  a loose version of the entry rule fired on IEX data. Claude re-checks the strict rule
-             on Robinhood bars with decide.py before buying; most candidates will not trade.
+  CANDIDATE  a loose version of the entry rule fired on IEX data (or MACD is about to cross:
+             near_cross=true). Claude re-checks the strict rule on Robinhood bars with decide.py
+             before buying, and re-checks for a couple of minutes; most candidates will not trade.
   EOD        flatten time reached. Claude cancels orders and sells what is left. The watcher exits.
   NO_DATA    no bars at all this morning (market holiday?). The watcher exits.
   ERROR      Alpaca polls keep failing; RECOVERED when they work again; FATAL then exit if it lasts.
@@ -34,7 +35,8 @@ def loose_match(ind, i, cfg):
     IEX bars differ from Robinhood's, and a missed candidate is a missed trade."""
     w, e = cfg.watcher, cfg.entry
     window = range(max(1, i - w.cross_window + 1), i + 1)
-    if not any(ind.macd[j] > ind.signal[j] and ind.macd[j - 1] <= ind.signal[j - 1] for j in window):
+    if not any(ind.macd[j] > ind.signal[j] and ind.macd[j - 1] <= ind.signal[j - 1] for j in window) \
+            and not near_cross(ind, i, w.near_cross_bars):
         return False
     rsi_ok = any(ind.rsi[j] is not None and ind.rsi[j] < e.rsi_max + w.rsi_slack for j in window)
     kd_lim = e.stoch_max + w.stoch_slack
@@ -43,11 +45,20 @@ def loose_match(ind, i, cfg):
     return rsi_ok and kd_ok
 
 
+def near_cross(ind, i, bars_ahead):
+    """MACD still below its signal line but closing the gap fast enough to cross within bars_ahead bars.
+    IEX crosses often come a minute later than Robinhood's; this wakes Claude early instead."""
+    if not bars_ahead or i < 1:
+        return False
+    gap, step = ind.hist[i], ind.hist[i] - ind.hist[i - 1]
+    return gap <= 0 and step > 0 and -gap <= step * bars_ahead
+
+
 def candidate(sym, bars, ind, i, cfg):
     snap = signals.snapshot(ind, i)
     return {"event": "CANDIDATE", "symbol": sym, "bar": bars[i].ts,
             "bar_et": parse_ts(bars[i].ts).astimezone(ET).strftime("%H:%M"), "close": bars[i].close,
-            "strict_on_iex": signals.is_entry(ind, i, cfg), **snap}
+            "strict_on_iex": signals.is_entry(ind, i, cfg), "near_cross": ind.hist[i] <= 0, **snap}
 
 
 class Watcher:

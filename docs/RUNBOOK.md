@@ -50,7 +50,8 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
 4. `python3 -m trader.live.decide state.json`。
 5. 把输出里的每个 `signals` 记进 journal，并把 `"SYMBOL@bar"` 加进 `journal/handled.json`（不管买没买，同一个信号只处理一次）。
 6. 执行 `actions`（见下表）。没有动作就回去等事件。
-7. 下了买单之后：用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 2–6 步（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
+7. 下了买单之后：用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 1–6 步（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
+8. 没有买入、但 decide 输出的 `forming` 不为空（超卖、MACD 正在靠近信号线）：等到下一分钟的第 20 秒左右（Bash `run_in_background` 跑 `sleep`），再做一次第 1–6 步。每个 CANDIDATE 最多再查 2 次（IEX 的金叉常常比 Robinhood 早或晚一分钟）。之后回去等事件。
 
 | 动作 | Robinhood 工具 | 参数 |
 |---|---|---|

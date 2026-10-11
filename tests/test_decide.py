@@ -88,6 +88,14 @@ class DecideTests(unittest.TestCase):
             self.assertEqual(decide(handled, self.cfg)["actions"], [])
         self.assertNotEqual(last, prev)
 
+    def test_forming_setup_is_flagged(self):
+        with mock.patch("trader.live.decide.signals.is_entry", return_value=False), \
+                mock.patch("trader.live.decide.signals.rsi_low", return_value=True), \
+                mock.patch("trader.live.decide.signals.kd_low", return_value=True), \
+                mock.patch("trader.live.decide.signals.compute") as compute:
+            compute.return_value.hist = [0.0] * 88 + [-0.3, -0.1]
+            self.assertEqual(decide(state(), self.cfg)["forming"], ["AAOI", "SNDK", "ASTS"])
+
     def test_stale_buy_order_is_cancelled(self):
         out = decide(state(orders=[{"id": "b1", "symbol": "ASTS", "side": "buy", "type": "limit", "quantity": 29,
                                     "limit_price": 51.7, "created_at": utc(DAY, "10:27")}]), self.cfg)

@@ -74,6 +74,17 @@ class AlpacaTests(unittest.TestCase):
         self.assertEqual(len(alpaca.regular_hours(bars)), 2)
 
 
+class NearCrossTests(unittest.TestCase):
+    def test_near_cross(self):
+        from types import SimpleNamespace
+        from trader.live.watcher import near_cross
+        ind = lambda h: SimpleNamespace(hist=h)
+        self.assertTrue(near_cross(ind([-0.30, -0.10]), 1, 2))    # closes 0.2/bar, 0.1 left
+        self.assertFalse(near_cross(ind([-0.30, -0.25]), 1, 2))   # too slow
+        self.assertFalse(near_cross(ind([-0.10, -0.20]), 1, 2))   # moving away
+        self.assertFalse(near_cross(ind([-0.30, -0.10]), 1, 0))   # disabled
+
+
 class WatcherTests(unittest.TestCase):
     def setUp(self):
         self.cfg = config.load()

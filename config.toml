@@ -70,6 +70,7 @@ poll_second = 4               # poll this many seconds after each minute closes
 rsi_slack = 5                 # candidate if RSI < rsi_max + rsi_slack ...
 stoch_slack = 5               # ... and %K, %D < stoch_max + stoch_slack ...
 cross_window = 2              # ... with a MACD golden cross on one of the last N bars
+near_cross_bars = 2           # ... or MACD closing on its signal line fast enough to cross within N bars (0 = off)
 fill_gaps = true              # minutes without IEX trades become flat bars
 history_days = 5              # calendar days of history fetched at start (indicator warm-up)
 max_errors = 3                # consecutive failed polls before an ERROR event
