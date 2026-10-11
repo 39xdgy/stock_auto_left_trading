@@ -185,7 +185,7 @@ class Watcher:
         limit = timedelta(minutes=self.cfg.watcher.fatal_after_minutes)
         if self.error_since and self.now() - self.error_since >= limit:
             self.emit({"event": "FATAL", "detail": f"Alpaca failing for {self.cfg.watcher.fatal_after_minutes} min; "
-                                                   "watcher stopped, fall back to Robinhood polling"})
+                                                   "watcher stopped"})
             self.status(state="fatal")
             return True
         return False
