@@ -1,12 +1,13 @@
 """One decision step: market state in, list of broker actions out. Runs once per minute.
 
     python -m trader.live.decide state.json
+    python -m trader.live.decide state.json --historicals saved_historicals.txt   # bars from a saved tool result
 
 The code never talks to the broker. Claude gathers the state through the Robinhood connector,
 runs this, and carries out the actions (or only journals them in observe mode). See docs/RUNBOOK.md.
 
 State (JSON):
-  now                 UTC time of the run, "2026-10-12T14:31:05Z"
+  now                 UTC time of the run, "2026-10-12T14:31:05Z" (CLI default: the current time)
   historicals         raw get_equity_historicals response (interval=minute), or
   bars                {symbol: [Robinhood bar dicts]}
   quotes              {symbol: {"ask": 109.88, "bid": 109.71}}               (optional)
@@ -23,11 +24,11 @@ import argparse
 import json
 import math
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from .. import config as config_mod
 from .. import signals
-from ..data import ET, Bar, bars_from_robinhood, parse_ts
+from ..data import ET, Bar, bars_from_robinhood, load_files, parse_ts
 from ..exits import stop_price, take_profit_price
 
 STALE_AFTER = timedelta(minutes=3)
@@ -157,9 +158,23 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="One decision step")
     ap.add_argument("state", help="state JSON file, or - for stdin")
     ap.add_argument("--config")
+    ap.add_argument("--historicals", nargs="+", metavar="FILE",
+                    help="saved get_equity_historicals results, used instead of the state's bars")
+    ap.add_argument("--signals-only", action="store_true",
+                    help="quick look without positions/orders: report signals and forming setups, no actions")
     a = ap.parse_args(argv)
     state = json.load(sys.stdin if a.state == "-" else open(a.state))
-    print(json.dumps(decide(state, config_mod.load(a.config)), indent=2))
+    state.setdefault("now", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    if a.historicals:
+        state.pop("historicals", None)
+        state["bars"] = {sym: [{"begins_at": b.ts, "open_price": b.open, "high_price": b.high, "low_price": b.low,
+                                "close_price": b.close, "volume": b.volume} for b in bars]
+                         for sym, bars in load_files(a.historicals).items()}
+    out = decide(state, config_mod.load(a.config))
+    if a.signals_only:
+        out["actions"] = []
+        out["notes"].append("signals-only: positions and orders were not checked; nothing to execute")
+    print(json.dumps(out, indent=2))
 
 
 if __name__ == "__main__":

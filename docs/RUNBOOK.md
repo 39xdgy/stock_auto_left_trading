@@ -44,14 +44,16 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
 
 ### 3. CANDIDATE
 
-1. `get_equity_historicals`：观察名单，`interval = "minute"`，`start_time` = 前一个交易日 ET 9:30，`bounds = "regular"`。
-2. `get_equity_quotes`、`get_equity_positions`、`get_equity_orders`（未成交的）。
-3. 写 `state.json`（格式见 `trader/live/decide.py` 顶部），`handled_signals` 取自 `journal/handled.json`，`realized_pnl_today` 从当天成交算出。
-4. `python3 -m trader.live.decide state.json`。
-5. 把输出里的每个 `signals` 记进 journal，并把 `"SYMBOL@bar"` 加进 `journal/handled.json`（不管买没买，同一个信号只处理一次）。
-6. 执行 `actions`（见下表）。没有动作就回去等事件。
-7. 下了买单之后：用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 1–6 步（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
-8. 没有买入、但 decide 输出的 `forming` 不为空（超卖、MACD 正在靠近信号线）：等到下一分钟的第 20 秒左右（Bash `run_in_background` 跑 `sleep`），再做一次第 1–6 步。每个 CANDIDATE 最多再查 2 次（IEX 的金叉常常比 Robinhood 早或晚一分钟）。之后回去等事件。
+大多数 CANDIDATE 不会交易，所以先用最省的方式看一眼：
+
+1. `get_equity_historicals`：观察名单，`interval = "minute"`，`start_time` = 前一个交易日 ET 9:30，`bounds = "regular"`。结果很大时会存成文件：不要把内容读进对话，用 `--historicals 文件路径` 交给 decide（顺便复制一份到 `data/YYYY-MM-DD/` 留给日报）。
+2. 先只用行情跑一次 decide：`state.json` 里只放 `handled_signals`（取自 `journal/handled.json`）、`realized_pnl_today`、`earnings_today`，运行 `python3 -m trader.live.decide state.json --historicals 文件路径 --signals-only`（`now` 默认是当前时间；这一步不输出任何动作）。
+   - `signals` 为空：看 `forming`（见第 7 步），否则回去等事件。不要多说话。
+3. 有信号时才补齐：`get_equity_quotes`、`get_equity_positions`、`get_equity_orders`（未成交的）、`buying_power`，写进 `state.json`，再跑一次 decide（去掉 `--signals-only`）。
+4. 把输出里的每个 `signals` 记进 journal，并把 `"SYMBOL@bar"` 加进 `journal/handled.json`（不管买没买，同一个信号只处理一次）。
+5. 执行 `actions`（见下表）。没有动作就回去等事件。
+6. 下了买单之后：用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 1–5 步（这时直接做完整的第 3 步）（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
+7. 没有买入、但 decide 输出的 `forming` 不为空（超卖、MACD 正在靠近信号线）：等到下一分钟的第 20 秒左右（Bash `run_in_background` 跑 `sleep`），再做一次第 1–5 步。每个 CANDIDATE 最多再查 2 次（IEX 的金叉常常比 Robinhood 早或晚一分钟）。之后回去等事件。
 
 | 动作 | Robinhood 工具 | 参数 |
 |---|---|---|
