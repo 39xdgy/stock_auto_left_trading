@@ -77,6 +77,17 @@ class DecideTests(unittest.TestCase):
         self.assertEqual([s["action"] for s in held["signals"]], ["already_holding", "buy", "max_positions"])
         self.assertEqual(decide(state(cash=50), self.cfg)["signals"][0]["action"], "not_enough_buying_power")
 
+    def test_signal_on_the_previous_bar_still_counts_once(self):
+        last, prev = utc(DAY, "10:29"), utc(DAY, "10:28")
+        on_prev = lambda ind, i, cfg: i == 88  # bars 09:00.. -> index 88 = 10:28
+        with mock.patch("trader.live.decide.signals.is_entry", side_effect=on_prev):
+            out = decide(state(), self.cfg)
+            self.assertEqual([a["signal_bar"] for a in out["actions"]], [prev, prev])
+            handled = state()
+            handled["handled_signals"] = [f"AAOI@{prev}", f"SNDK@{prev}", f"ASTS@{prev}"]
+            self.assertEqual(decide(handled, self.cfg)["actions"], [])
+        self.assertNotEqual(last, prev)
+
     def test_stale_buy_order_is_cancelled(self):
         out = decide(state(orders=[{"id": "b1", "symbol": "ASTS", "side": "buy", "type": "limit", "quantity": 29,
                                     "limit_price": 51.7, "created_at": utc(DAY, "10:27")}]), self.cfg)

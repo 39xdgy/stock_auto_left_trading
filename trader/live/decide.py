@@ -15,6 +15,8 @@ State (JSON):
   realized_pnl_today  float
   earnings_today      [symbol, ...]                                          (optional)
   buying_power        float                                                  (optional)
+  handled_signals     ["AAOI@2026-10-12T14:31:00Z", ...] signals already acted on or skipped today;
+                      needed because a signal stays visible for signal_lookback_bars more minutes
 """
 
 import argparse
@@ -113,9 +115,12 @@ def decide(state, cfg):
             notes.append(f"{sym}: last bar {b[-1].ts} is stale")
             continue
         ind = signals.compute(b, cfg)
-        i = len(b) - 1
-        if not signals.is_entry(ind, i, cfg):
+        handled = set(state.get("handled_signals", []))
+        lookback = getattr(cfg.entry, "signal_lookback_bars", 0)
+        hits = [j for j in range(len(b) - 1, len(b) - 2 - lookback, -1) if signals.is_entry(ind, j, cfg)]
+        if not hits or f"{sym}@{b[hits[0]].ts}" in handled:
             continue
+        i = hits[0]
         sig = {"symbol": sym, "bar": b[i].ts, "close": b[i].close, **signals.snapshot(ind, i)}
         skip = gate
         if not skip and sym in held:
