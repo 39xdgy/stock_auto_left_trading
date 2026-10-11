@@ -1,6 +1,12 @@
 """Recall of watcher CANDIDATEs against the expected strict Robinhood (SIP) signals.
 
-    python3 validation/analyze.py validation/fill_augsep.jsonl validation/fill_oct.jsonl
+    python3 validation/analyze.py DAYS validation/fill_augsep.jsonl validation/fill_oct.jsonl
+    python3 validation/analyze.py --rule window DAYS validation/near2_augsep.jsonl validation/near2_oct.jsonl
+
+DAYS is a comma-separated list of trading days (for candidates/day).
+--rule old (default): CAUGHT = candidate at s or s+1, LATE = s+2..s+3.
+--rule window: CAUGHT = candidate at s-2..s+1 (Claude rechecks Robinhood at the candidate
+minute and up to 2 minutes after, each check looking at the last 2 completed bars).
 """
 import json
 import sys
@@ -30,15 +36,16 @@ def load(paths):
     return cands
 
 
-def analyze(cands, n_days):
+def analyze(cands, n_days, rule="old"):
     caught, late, missed = [], [], []
+    caught_d, late_d = ((0, 1), (2, 3)) if rule == "old" else ((-2, -1, 0, 1), ())
     for day, s, sym in EXPECTED:
         same = [c for c in cands if c["symbol"] == sym and c["day"] == day]
         deltas = sorted((minutes(c["bar_et"]) - minutes(s), c["bar_et"]) for c in same)
-        if any(d in (0, 1) for d, _ in deltas):
+        if any(d in caught_d for d, _ in deltas):
             caught.append((day, s, sym))
-        elif any(d in (2, 3) for d, _ in deltas):
-            late.append((day, s, sym, [b for d, b in deltas if d in (2, 3)][0]))
+        elif any(d in late_d for d, _ in deltas):
+            late.append((day, s, sym, [b for d, b in deltas if d in late_d][0]))
         else:
             near = min(deltas, key=lambda x: abs(x[0]))[1] if deltas else None
             missed.append((day, s, sym, near))
@@ -47,10 +54,15 @@ def analyze(cands, n_days):
     return {"caught": caught, "late": late, "missed": missed, "n": len(cands),
             "mean_per_day": sum(counts) / len(counts), "max_per_day": max(counts),
             "max_day": max(n_days, key=lambda d: per_day.get(d, 0)),
-            "strict_on_iex": sum(c["strict_on_iex"] for c in cands)}
+            "strict_on_iex": sum(c["strict_on_iex"] for c in cands),
+            "near_cross": sum(bool(c.get("near_cross")) for c in cands)}
 
 
 if __name__ == "__main__":
-    days = sys.argv[1].split(",")
-    r = analyze(load(sys.argv[2:]), days)
+    args = sys.argv[1:]
+    rule = "old"
+    if args[0] == "--rule":
+        rule, args = args[1], args[2:]
+    days = args[0].split(",")
+    r = analyze(load(args[1:]), days, rule)
     print(json.dumps(r, indent=1))

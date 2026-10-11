@@ -1,3 +1,21 @@
+# Near-cross wake condition, window matching rule (2026-10-11)
+
+Backfill of `trader/live/watcher.py` on main (55f1d86, adds `near_cross_bars`), fill_gaps=true, slack 5, same 32 trading days and 26 expected signals. New rule (`analyze.py --rule window`): an expected signal at bar s is CAUGHT if a candidate for that symbol and day has bar_et in s-2..s+1 (Claude rechecks Robinhood at the candidate minute and up to 2 minutes after, each check looking at the last 2 completed bars).
+
+| variant | caught (window) | caught / late (old rule) | candidates | per day mean / max | near_cross=true |
+|---|---|---|---|---|---|
+| near_cross_bars=2 (config) | 24/26 | 19 / 4 | 840 | 26.2 / 54 (2026-09-23) | 641 |
+| near_cross_bars=3 | 25/26 | 21 / 2 | 1073 | 33.5 / 65 (2026-09-23) | 870 |
+| previous fill variant (no near-cross) | 21/26 | 18 / 4 | 271 | 8.5 / 19 (2026-10-08) | n/a |
+
+Missed under the window rule (nearest same-day candidate for that symbol):
+
+- near2: 2026-09-10 15:21 ASTS (15:18); 2026-09-18 10:09 ASTS (09:46)
+- near3: 2026-09-18 10:09 ASTS (09:46)
+- fill: 2026-08-20 11:30 ASTS (11:32); 2026-09-01 14:26 SNDK (14:28); 2026-09-10 15:21 ASTS (15:18); 2026-09-14 10:54 AAOI (10:56); 2026-09-18 10:09 ASTS (09:47)
+
+Files: `near2_*.jsonl`, `near3_*.jsonl` (near3 used a config copy with `near_cross_bars = 3`).
+
 # Watcher validation (Alpaca IEX vs expected strict Robinhood SIP signals)
 
 Backfill of `trader/live/watcher.py` on main (bb10e21) over 2026-08-17..2026-09-28 and 2026-10-08..09 (32 trading days), 26 expected signals. CAUGHT = candidate at bar s or s+1; LATE = s+2..s+3. Candidates/day is over all trading days in the range.
