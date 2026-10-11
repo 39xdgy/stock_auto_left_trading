@@ -3,6 +3,9 @@
 1 分钟级别的日内"左侧"交易：股票超卖后，等 MACD 金叉确认反弹再买入，涨 0.83% 就卖。
 在 Robinhood 的 Agentic 账户里运行，下单由 Claude 通过 Robinhood connector 执行。
 
+每个交易日 CT 8:20 由 Routine 新开一个会话：后台脚本用 Alpaca 免费数据每分钟算指标，只有接近买点时才叫醒 Claude，
+Claude 再用 Robinhood 数据按严格规则确认后下单；CT 14:50 平仓，CT 14:53 另一个 Routine 兜底。详见 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
+
 ## 当前规则（2026-10-10 定）
 
 | 项目 | 设定 |
@@ -36,7 +39,10 @@ trader/
   signals.py           买入规则（strict 在用；macd_kd、macd_rsi 只做对比）
   exits.py             止盈价、出场模拟（固定止盈；两种动态止盈只做影子记录）
   backtest.py          回测
-  live/decide.py       每分钟的决策：行情和持仓进 → 要执行的动作出
+  live/decide.py       一次决策：行情和持仓进 → 要执行的动作出
+  live/alpaca.py       Alpaca 1 分钟 K 线（IEX，只做预筛）
+  live/watcher.py      盯盘脚本：接近买点时输出 CANDIDATE 事件叫醒 Claude；收盘输出 EOD
+scripts/               启动 watcher（start_watcher.sh），等下一个事件（next_event.sh）
   journal.py           交易日志和每日对比报告
 docs/RUNBOOK.md        Claude 每分钟怎么执行
 tests/                 单元测试（只用标准库）
@@ -50,6 +56,7 @@ tests/                 单元测试（只用标准库）
 python -m unittest discover -s tests -t .                       # 测试
 python -m trader.backtest data/*.json --compare                  # 回测：固定止盈 vs 动态止盈
 python -m trader.live.decide state.json                          # 一次决策
+python -m trader.live.watcher --backfill 2026-10-09 2026-10-09   # 回放某几天会产生哪些 CANDIDATE（需要 Alpaca key）
 python -m trader.journal report journal/DAY.jsonl data/*.json --day DAY
 ```
 
@@ -59,9 +66,7 @@ python -m trader.journal report journal/DAY.jsonl data/*.json --day DAY
 
 | 设置 | 现在 | 以后 |
 |---|---|---|
-| `run.mode` | `observe`：只记录不下单 | `live` |
 | `exit.stop_loss.enabled` | `false` | 代码已支持，打开就按收盘价检查 |
 | `exit.dynamic` | 只做影子记录 | 实盘攒够 20–30 笔后，再决定是否改用动态止盈（利润回落一半或 K、D > 80 时卖） |
 | `entry.macd_min_cross_margin` | `0.0` | 设大于 0，过滤 MACD 刚擦过信号线的金叉 |
-| `notifications.mode` | `none` | 后台脚本接实时行情，或通过 Routine API 触发 |
 | 观察名单 | 3 只 | 扫描后扩充到 4–6 只、来自不同板块 |

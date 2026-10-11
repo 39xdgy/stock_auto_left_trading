@@ -54,7 +54,7 @@ def decide(state, cfg):
     hhmm = now.astimezone(ET).strftime("%H:%M")
     positions = [p for p in state.get("positions", []) if float(p["quantity"]) > 0]
     orders = state.get("open_orders", [])
-    actions, sigs, notes = [], [], []
+    actions, sigs, notes, forming = [], [], [], []
 
     def orders_for(sym, side):
         return [o for o in orders if o["symbol"] == sym and o["side"] == side]
@@ -119,6 +119,10 @@ def decide(state, cfg):
         lookback = getattr(cfg.entry, "signal_lookback_bars", 0)
         hits = [j for j in range(len(b) - 1, len(b) - 2 - lookback, -1) if signals.is_entry(ind, j, cfg)]
         if not hits or f"{sym}@{b[hits[0]].ts}" in handled:
+            j = len(b) - 1
+            if not hits and signals.rsi_low(ind, j, cfg) and signals.kd_low(ind, j, cfg) \
+                    and ind.hist[j] <= 0 and ind.hist[j] > ind.hist[j - 1]:
+                forming.append(sym)  # oversold and MACD closing in: worth another look next minute
             continue
         i = hits[0]
         sig = {"symbol": sym, "bar": b[i].ts, "close": b[i].close, **signals.snapshot(ind, i)}
@@ -145,7 +149,8 @@ def decide(state, cfg):
                     cash -= qty * px
         sig["action"] = skip or "buy"
         sigs.append(sig)
-    return {"now_et": hhmm, "mode": cfg.run.mode, "actions": actions, "signals": sigs, "notes": notes}
+    return {"now_et": hhmm, "mode": cfg.run.mode, "actions": actions, "signals": sigs, "notes": notes,
+            "forming": forming}
 
 
 def main(argv=None):
