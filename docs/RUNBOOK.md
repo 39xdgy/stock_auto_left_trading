@@ -51,7 +51,7 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
    - `signals` 为空：看 `forming`（见第 7 步），否则回去等事件。不要多说话。
 3. 有信号时才补齐：`get_equity_quotes`、`get_equity_positions`、`get_equity_orders`（未成交的）、`buying_power`，写进 `state.json`，再跑一次 decide（去掉 `--signals-only`）。
 4. 把输出里的每个 `signals` 记进 journal，并把 `"SYMBOL@bar"` 加进 `journal/handled.json`（不管买没买，同一个信号只处理一次）。
-5. 执行 `actions`（见下表）。没有动作就回去等事件。
+5. 立刻执行 `actions`（见下表），不要再去拉别的数据：信号是按分钟算的，晚一分钟就可能过了入场时间或价格。没有动作就回去等事件。
 6. 下了买单之后：用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 1–5 步（这时直接做完整的第 3 步）（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
 7. 没有买入、但 decide 输出的 `forming` 不为空（超卖、MACD 正在靠近信号线）：等到下一分钟的第 20 秒左右（Bash `run_in_background` 跑 `sleep`），再做一次第 1–5 步。每个 CANDIDATE 最多再查 2 次（IEX 的金叉常常比 Robinhood 早或晚一分钟）。之后回去等事件。
 
@@ -67,7 +67,7 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
 
 1. 重建 state，跑 decide（这时它只会输出撤单和市价卖出），执行。
 2. 再查一次 `get_equity_positions`，确认 Agentic 账户里观察名单的股票都是 0 股。
-3. 日报：当天的信号、成交、盈亏，加上 `python3 -m trader.journal report ...` 的固定 vs 动态止盈对比。把 `journal/` 和当天的 Robinhood 数据推到仓库的 `journal` 分支（`journal/YYYY-MM-DD/`），不要推到 main；推不上去就把日报完整写在最后的回复里。
+3. 日报（写在最后的回复里，不推到仓库：这是公开仓库，交易记录不放上去）：当天的信号（包括没交易的和原因）、成交（用 `get_equity_orders` 核对价格和时间）、已实现盈亏、CANDIDATE 次数、遇到的问题。不需要跑 `trader.journal report`：Robinhood 保留约 6 周的 1 分钟数据，动态止盈的对比之后统一从 Robinhood 重新拉数据计算。
 
 ### 5. 出问题
 
