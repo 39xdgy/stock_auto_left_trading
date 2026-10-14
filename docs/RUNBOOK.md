@@ -52,7 +52,7 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
 3. 有信号时才补齐：`get_equity_quotes`、`get_equity_positions`、`get_equity_orders`（未成交的）、`buying_power`，写进 `state.json`，再跑一次 decide（去掉 `--signals-only`）。
 4. 把输出里的每个 `signals` 记进 journal，并把 `"SYMBOL@bar"` 加进 `journal/handled.json`（不管买没买，同一个信号只处理一次）。
 5. 立刻执行 `actions`（见下表），不要再去拉别的数据：信号是按分钟算的，晚一分钟就可能过了入场时间或价格。没有动作就回去等事件。
-6. 下了买单之后：用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 1–5 步（这时直接做完整的第 3 步）（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
+6. 下了买单之后：`place_equity_order` 返回的状态是 `unconfirmed`、`queued` 或 `confirmed` 都是正常的过渡状态（订单已提交，交易所还没回报），**不是**要用户确认，不要停下来问。Agentic 账户的人工审批是关闭的（可以用 `get_trade_approval_setting` 核对）。接着用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 1–5 步（这时直接做完整的第 3 步）（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
 7. 没有买入、但 decide 输出的 `forming` 不为空（超卖、MACD 正在靠近信号线）：等到下一分钟的第 20 秒左右（Bash `run_in_background` 跑 `sleep`），再做一次第 1–5 步。每个 CANDIDATE 最多再查 2 次（IEX 的金叉常常比 Robinhood 早或晚一分钟）。之后回去等事件。
 
 | 动作 | Robinhood 工具 | 参数 |
@@ -78,6 +78,8 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
 
 ## 安全规则
 
+- **在 EOD 处理完之前，绝不能结束回合、停下来等用户回复。** 这个会话没有人在看，结束回合就等于停止交易：止盈单挂不上，15:50 也不会平仓（2026-10-14 就发生过）。任何时候结束一步，都必须已经有一个 Bash `run_in_background` 在跑（`next_event.sh` 或 `sleep`）来叫醒自己。不确定的事情记下来写进日报，继续按手册走；需要停止开新仓时也照样要等到 EOD 平仓。
+- 只有两种情况可以提前结束：`NO_DATA`（休市），或者没有 Robinhood 工具。
 - 只在 Agentic 账户下单，不碰主账户和 Roth IRA；不使用需要账号密码的非官方库。
 - 不打印、不提交任何密钥；账号不进仓库。
 - `decide` 的输出如果看起来不对（比如一次要买超过 `max_positions` 只、价格离报价很远），不执行，告诉用户。
