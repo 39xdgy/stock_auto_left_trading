@@ -49,7 +49,7 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
 1. `get_equity_historicals`：观察名单，`interval = "minute"`，`start_time` = 前一个交易日 ET 9:30，`bounds = "regular"`。结果很大时会存成文件：不要把内容读进对话，用 `--historicals 文件路径` 交给 decide（顺便复制一份到 `data/YYYY-MM-DD/` 留给日报）。
 2. 先只用行情跑一次 decide：`state.json` 里只放 `handled_signals`（取自 `journal/handled.json`）、`realized_pnl_today`、`earnings_today`，运行 `python3 -m trader.live.decide state.json --historicals 文件路径 --signals-only`（`now` 默认是当前时间；这一步不输出任何动作）。
    - `signals` 为空：看 `forming`（见第 7 步），否则回去等事件。不要多说话。
-3. 有信号时才补齐：`get_equity_quotes`、`get_equity_positions`、`get_equity_orders`（未成交的）、`buying_power`，写进 `state.json`，再跑一次 decide（去掉 `--signals-only`）。
+3. 有信号时才补齐：`get_equity_quotes`、`get_equity_positions`、`get_equity_orders`（未成交的）、`get_advanced_orders`（未完成的 OCO，写成 `oco_orders`，包括每个 OCO 两条腿的订单号 `leg_ids`）、`buying_power`，写进 `state.json`，再跑一次 decide（去掉 `--signals-only`）。如果今天已经确定 OCO 用不了，加上 `"oco_unavailable": true`。
 4. 把输出里的每个 `signals` 记进 journal，并把 `"SYMBOL@bar"` 加进 `journal/handled.json`（不管买没买，同一个信号只处理一次）。
 5. 立刻执行 `actions`（见下表），不要再去拉别的数据：信号是按分钟算的，晚一分钟就可能过了入场时间或价格。没有动作就回去等事件。
 6. 下了买单之后：`place_equity_order` 返回的状态是 `unconfirmed`、`queued` 或 `confirmed` 都是正常的过渡状态（订单已提交，交易所还没回报），**不是**要用户确认，不要停下来问。Agentic 账户的人工审批是关闭的（可以用 `get_trade_approval_setting` 核对）。接着用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 1–5 步（这时直接做完整的第 3 步）（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
@@ -58,14 +58,21 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
 | 动作 | Robinhood 工具 | 参数 |
 |---|---|---|
 | `buy_limit` | 先 `review_equity_order`，再 `place_equity_order` | side=buy, type=limit, limit_price, quantity, time_in_force=gfd, market_hours=regular_hours, 新的 ref_id |
+| `place_oco` | 先 `review_advanced_order`，再 `place_advanced_order` | side=sell, quantity, take_profit_limit_price, stop_loss_stop_price, time_in_force=gfd, market_hours=regular_hours, 新的 ref_id。止盈和止损是同一个 OCO 单：一边成交，Robinhood 自动撤掉另一边 |
+| `cancel_oco` | `cancel_advanced_order` | order_id（OCO 的 id，两条腿一起撤） |
 | `place_take_profit` | `place_equity_order` | side=sell, type=limit, limit_price, quantity, time_in_force=gfd |
+| `set_watch_stop` | 写文件 | 把 `{symbol: stop_price}` 合并进 `journal/stops.json`，watcher 每分钟检查，跌破就发 `STOP` 事件 |
 | `create_price_alert` | `create_alert` | condition_type=price_below, threshold |
 | `cancel_order` | `cancel_equity_order` | order_id |
 | `sell_market` | `place_equity_order` | side=sell, type=market, quantity |
 
+**OCO 用不了时（备用方案）**：`review_advanced_order` 返回 `customer_approval_required: true`（需要你在 App 里批准，而没人会批准），或者 OCO 被拒绝（比如价格已经离止盈或止损不到 0.25%），就**不要**下这个 OCO。当天之后的 state 都加上 `"oco_unavailable": true` 再跑 decide：它会改为挂普通止盈限价单，加上 `set_watch_stop`；watcher 发 `STOP` 事件时，重建 state 跑 decide，它会撤掉止盈单并市价卖出。写进日报。
+
+**`STOP` 事件**：和 CANDIDATE 一样补齐完整 state（第 3 步），跑 decide，立刻执行。
+
 ### 4. EOD（ET 15:50 / CT 14:50）
 
-1. 重建 state，跑 decide（这时它只会输出撤单和市价卖出），执行。
+1. 重建 state（包括 `get_advanced_orders`），跑 decide（这时它只会输出撤单、撤 OCO 和市价卖出），执行。
 2. 再查一次 `get_equity_positions`，确认 Agentic 账户里观察名单的股票都是 0 股。
 3. 日报（写在最后的回复里，不推到仓库：这是公开仓库，交易记录不放上去）：当天的信号（包括没交易的和原因）、成交（用 `get_equity_orders` 核对价格和时间）、已实现盈亏、CANDIDATE 次数、遇到的问题。不需要跑 `trader.journal report`：Robinhood 保留约 6 周的 1 分钟数据，动态止盈的对比之后统一从 Robinhood 重新拉数据计算。
 

@@ -59,10 +59,18 @@ class ExitTests(unittest.TestCase):
         self.assertEqual(reason, "end_of_day")
         self.assertEqual(bars[j].ts, make_bars([0], start="15:50")[0].ts)
 
-    def test_no_stop_loss_by_default(self):
+    def test_no_stop_loss_when_disabled(self):
+        cfg = config.load(overrides={"exit": {"stop_loss": {"enabled": False}}})
         bars = make_bars([100, 95, 90, 85, 99], start="10:00", spread=0.0)
-        _, _, reason = simulate(bars, self._flat_ind(bars), 1, 100.0, self.cfg)
+        _, _, reason = simulate(bars, self._flat_ind(bars), 1, 100.0, cfg)
         self.assertEqual(reason, "end_of_day")
+
+    def test_oco_stop_fills_on_an_intrabar_touch(self):
+        bars = make_bars([100, 100.2, 99.9, 100.1], start="10:00", spread=0.0,
+                         lows=[100, 100, 98.4, 100])  # 98.4 <= 98.50 stop, close stays above
+        px, j, reason = simulate(bars, self._flat_ind(bars), 1, 100.0, self.cfg)
+        self.assertEqual((reason, j), ("stop_loss", 2))
+        self.assertAlmostEqual(px, 98.5 * (1 - 0.0))
 
     def test_dynamic2_keeps_half_of_the_best_gain(self):
         closes = [100, 100.5, 101.0, 102.0, 101.4, 101.0, 100.9]

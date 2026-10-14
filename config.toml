@@ -41,8 +41,12 @@ enabled = true
 pct = 0.0083                  # fixed take-profit, resting limit order on the broker
 
 [exit.stop_loss]
-enabled = false               # decided 2026-10-10: no price stop (backtests were as good or better without)
-pct = 0.02                    # kept for later; not used while disabled
+enabled = true                # 2026-10-14: on, after AAOI fell 6% with no stop (-$90)
+pct = 0.015                   # backtest (26 signals, intraday touch): +$149 vs +$152 without, worst trade -$23
+mode = "oco"                  # "oco": one OCO order at the broker (take-profit limit + stop-market, filling one
+                              #        cancels the other)
+                              # "monitored": take-profit limit + market sell when a 1-minute bar closes at or below
+                              #        the stop (fallback when OCO is unavailable)
 
 [exit.dynamic]
 # Shadow only: the journal records what these exits WOULD have done. Never executed.

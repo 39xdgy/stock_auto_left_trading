@@ -1,6 +1,6 @@
 """Exit rules.
 
-Live: fixed take-profit (a resting limit order) + flatten at end of day. No price stop.
+Live: fixed take-profit + stop-loss (one OCO order at the broker) + flatten at end of day.
 Shadow: dynamic take-profit variants, simulated on the same bars for the journal only.
 """
 
@@ -15,7 +15,7 @@ def take_profit_price(entry_price, cfg):
 
 
 def stop_price(entry_price, cfg):
-    """Placeholder: only used if exit.stop_loss.enabled is turned on."""
+    """Stop trigger price, rounded DOWN to the cent."""
     return math.floor(entry_price * (1 - cfg.exit.stop_loss.pct) * 100 + 1e-9) / 100
 
 
@@ -54,6 +54,8 @@ def simulate(bars, ind, entry_index, entry_price, cfg, variant="fixed", half_spr
                 trail = entry_price + dyn.giveback * (peak - entry_price)
                 if variant == "dynamic3":
                     trail = max(trail, tp)
+        if use_sl and getattr(cfg.exit.stop_loss, "mode", "oco") == "oco" and b.low <= sl:
+            return min(sl, b.open) * (1 - half_spread), j, "stop_loss"  # resting stop; checked before the TP (conservative)
         if use_sl and b.close <= sl:  # polled stop: sell next bar open
             return next_open * (1 - half_spread), j + 1, "stop_loss"
         if et_hhmm(b.ts) >= cfg.exit.end_of_day.flatten_time:

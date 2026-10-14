@@ -8,6 +8,8 @@ Each stdout line is one JSON event, and each one is meant to wake Claude (Monito
   CANDIDATE  a loose version of the entry rule fired on IEX data (or MACD is about to cross:
              near_cross=true). Claude re-checks the strict rule on Robinhood bars with decide.py
              before buying, and re-checks for a couple of minutes; most candidates will not trade.
+  STOP       a completed bar closed at or below a stop listed in the stops file (--stops; only used in the
+             "monitored" stop-loss fallback, when OCO orders are unavailable). Claude re-checks and sells.
   EOD        flatten time reached. Claude cancels orders and sells what is left. The watcher exits.
   NO_DATA    no bars at all this morning (market holiday?). The watcher exits.
   ERROR      Alpaca polls keep failing; RECOVERED when they work again; FATAL then exit if it lasts.
@@ -63,10 +65,12 @@ def candidate(sym, bars, ind, i, cfg):
 
 class Watcher:
     def __init__(self, cfg, fetch=alpaca.fetch_bars, now=lambda: datetime.now(timezone.utc), sleep=time.sleep,
-                 emit=None, status_path=None):
+                 emit=None, status_path=None, stops_path=None):
         self.cfg, self.fetch, self.now, self.sleep = cfg, fetch, now, sleep
         self.emit_fn = emit or (lambda line: print(line, flush=True))
         self.status_path = status_path
+        self.stops_path = stops_path
+        self.stops_fired = set()
         self.symbols = list(cfg.symbols.watchlist)
         self.bars = {s: {} for s in self.symbols}
         self.last_candidate = {}   # symbol -> bar index time of the last CANDIDATE
@@ -113,6 +117,28 @@ class Watcher:
         if self.cfg.watcher.fill_gaps:
             rows = alpaca.fill_gaps(rows, until=until)
         return [b for b in rows if parse_ts(b.ts) + timedelta(minutes=1) <= until]  # completed bars only
+
+    def check_stops(self, now):
+        """STOP events for {symbol: stop_price} in the stops file (written by Claude)."""
+        if not self.stops_path:
+            return []
+        try:
+            with open(self.stops_path) as f:
+                stops = json.load(f)
+        except (OSError, ValueError):
+            return []
+        found = []
+        for sym, stop in stops.items():
+            if sym not in self.bars or (sym, stop) in self.stops_fired:
+                continue
+            bars = self.series(sym, now)
+            if bars and now - parse_ts(bars[-1].ts) <= timedelta(minutes=3) and bars[-1].close <= float(stop):
+                self.stops_fired.add((sym, stop))
+                found.append({"event": "STOP", "symbol": sym, "stop_price": float(stop), "bar": bars[-1].ts,
+                              "close": bars[-1].close})
+        for ev in found:
+            self.emit(ev)
+        return found
 
     def check(self, now, force=False, prepared=None):
         """CANDIDATE events for the last completed bar of each symbol."""
@@ -185,6 +211,7 @@ class Watcher:
                 self.emit({"event": "NO_DATA", "detail": "no bars today; market closed?"})
                 self.status(state="no_data")
                 return 0
+            self.check_stops(now)
             self.check(now)
             self.status(state="running")
 
@@ -242,10 +269,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Alpaca pre-filter that wakes Claude on candidate entries")
     ap.add_argument("--config")
     ap.add_argument("--status", help="write a small JSON status file here every minute")
+    ap.add_argument("--stops", help="JSON file {symbol: stop_price} to watch (monitored stop-loss fallback)")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--backfill", nargs=2, metavar=("FIRST_DAY", "LAST_DAY"))
     a = ap.parse_args(argv)
-    w = Watcher(config_mod.load(a.config), status_path=a.status)
+    w = Watcher(config_mod.load(a.config), status_path=a.status, stops_path=a.stops)
     if a.backfill:
         return w.backfill(*a.backfill)
     if a.once:

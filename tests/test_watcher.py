@@ -114,6 +114,19 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(len(hits), 1, hits)
         self.assertEqual(hits[0]["symbol"], "AAOI")
 
+    def test_stop_event_once(self):
+        import tempfile
+        bars = make_bars([100.0] * 70 + [97.0], day=DAY, start="09:30")
+        now = parse_ts(bars[-1].ts) + timedelta(minutes=1, seconds=4)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"AAOI": 98.5}, f)
+        w, _ = self.watcher({"AAOI": bars}, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        w.stops_path = f.name
+        w.poll(now - timedelta(days=1))
+        self.assertEqual([e["event"] for e in w.check_stops(now)], ["STOP"])
+        self.assertEqual(w.check_stops(now), [])
+        os.unlink(f.name)
+
     def test_no_candidate_outside_entry_window(self):
         bars = dip_then_bounce()
         now = parse_ts(bars[-1].ts) + timedelta(minutes=1)

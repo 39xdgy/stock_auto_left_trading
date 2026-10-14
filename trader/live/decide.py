@@ -13,6 +13,9 @@ State (JSON):
   quotes              {symbol: {"ask": 109.88, "bid": 109.71}}               (optional)
   positions           [{"symbol", "quantity", "avg_price"}]
   open_orders         [{"id", "symbol", "side", "type", "quantity", "limit_price", "created_at"}]
+  oco_orders          [{"id", "symbol", "quantity", "take_profit_price", "stop_price", "leg_ids": [...]}]
+                      open OCO orders (get_advanced_orders); their legs are ignored in open_orders
+  oco_unavailable     true when OCO cannot be used today: stops are then monitored (optional)
   realized_pnl_today  float
   earnings_today      [symbol, ...]                                          (optional)
   buying_power        float                                                  (optional)
@@ -60,14 +63,22 @@ def decide(state, cfg):
     def orders_for(sym, side):
         return [o for o in orders if o["symbol"] == sym and o["side"] == side]
 
+    # Legs of an OCO also show up as plain sell orders; handle them through the OCO only.
+    ocos = state.get("oco_orders", [])
+    oco_legs = {leg for o in ocos for leg in o.get("leg_ids", [])}
+    orders = [o for o in orders if o["id"] not in oco_legs]
+
     # 1. End of day: cancel everything, sell everything, no new entries.
     if hhmm >= cfg.exit.end_of_day.flatten_time:
+        for o in ocos:
+            actions.append({"type": "cancel_oco", "order_id": o["id"], "symbol": o["symbol"], "reason": "end_of_day"})
         for o in orders:
             actions.append({"type": "cancel_order", "order_id": o["id"], "symbol": o["symbol"], "reason": "end_of_day"})
         for p in positions:
             actions.append({"type": "sell_market", "symbol": p["symbol"], "quantity": float(p["quantity"]),
                             "reason": "end_of_day"})
-        return {"now_et": hhmm, "mode": cfg.run.mode, "actions": actions, "signals": sigs, "notes": notes}
+        return {"now_et": hhmm, "mode": cfg.run.mode, "actions": actions, "signals": sigs, "notes": notes,
+                "forming": forming}
 
     # 2. Buy orders that did not fill in time.
     ttl = timedelta(minutes=cfg.entry.buy_order_ttl_minutes)
@@ -75,26 +86,55 @@ def decide(state, cfg):
         if o["side"] == "buy" and o.get("created_at") and now - parse_ts(o["created_at"]) > ttl:
             actions.append({"type": "cancel_order", "order_id": o["id"], "symbol": o["symbol"], "reason": "buy_not_filled"})
 
-    # 3. Every position gets exactly one take-profit order for its full quantity.
+    # 3. Every position gets its exits for the full quantity:
+    #    stop_loss.mode = "oco":       one OCO order (take-profit limit + stop-market; the broker cancels the other leg)
+    #    stop_loss.mode = "monitored": a take-profit limit, and a market sell when a completed bar closes at or
+    #                                  below the stop (used when OCO is unavailable: state "oco_unavailable": true)
+    #    stop_loss disabled:           a take-profit limit only
     bars = _bars(state)
+    sl = cfg.exit.stop_loss
+    mode = None
+    if sl.enabled:
+        mode = "monitored" if state.get("oco_unavailable") else getattr(sl, "mode", "oco")
     for p in positions:
         sym, qty, avg = p["symbol"], float(p["quantity"]), float(p["avg_price"])
         sells = orders_for(sym, "sell")
-        if cfg.exit.stop_loss.enabled:  # placeholder, off by default
+        my_ocos = [o for o in ocos if o["symbol"] == sym]
+        tp, stop = take_profit_price(avg, cfg), stop_price(avg, cfg)
+        if mode == "monitored":
             last = _completed(bars.get(sym, []), now)
-            if last and last[-1].close <= stop_price(avg, cfg):
-                actions += [{"type": "cancel_order", "order_id": o["id"], "symbol": sym, "reason": "stop_loss"} for o in sells]
+            if last and last[-1].close <= stop:
+                actions += [{"type": "cancel_oco", "order_id": o["id"], "symbol": sym, "reason": "stop_loss"}
+                            for o in my_ocos]
+                actions += [{"type": "cancel_order", "order_id": o["id"], "symbol": sym, "reason": "stop_loss"}
+                            for o in sells]
                 actions.append({"type": "sell_market", "symbol": sym, "quantity": qty, "reason": "stop_loss"})
                 continue
+        if mode == "oco":
+            good = [o for o in my_ocos if float(o["quantity"]) == qty
+                    and abs(float(o["take_profit_price"]) - tp) < 0.005 and abs(float(o["stop_price"]) - stop) < 0.005]
+            if good and not sells and len(my_ocos) == 1:
+                continue
+            actions += [{"type": "cancel_oco", "order_id": o["id"], "symbol": sym, "reason": "replace_exits"}
+                        for o in my_ocos]
+            actions += [{"type": "cancel_order", "order_id": o["id"], "symbol": sym, "reason": "replace_exits"}
+                        for o in sells]
+            actions.append({"type": "place_oco", "symbol": sym, "quantity": qty, "take_profit_limit_price": tp,
+                            "stop_loss_stop_price": stop, "time_in_force": "gfd"})
+            continue
         if not cfg.exit.take_profit.enabled:
             continue
-        if sum(float(o["quantity"]) for o in sells) == qty:
+        if not my_ocos and sum(float(o["quantity"]) for o in sells) == qty:
             continue
+        actions += [{"type": "cancel_oco", "order_id": o["id"], "symbol": sym, "reason": "replace_exits"}
+                    for o in my_ocos]
         actions += [{"type": "cancel_order", "order_id": o["id"], "symbol": sym, "reason": "resize_take_profit"}
                     for o in sells]
         actions.append({"type": "place_take_profit", "symbol": sym, "quantity": qty,
-                        "limit_price": take_profit_price(avg, cfg), "time_in_force": "gfd"})
-        if not sells and cfg.alerts.price_alert_pct:
+                        "limit_price": tp, "time_in_force": "gfd"})
+        if mode == "monitored":
+            actions.append({"type": "set_watch_stop", "symbol": sym, "stop_price": stop})
+        if not sells and not my_ocos and cfg.alerts.price_alert_pct and not sl.enabled:
             actions.append({"type": "create_price_alert", "symbol": sym, "condition": "price_below",
                             "threshold": round(avg * (1 + cfg.alerts.price_alert_pct), 2)})
 

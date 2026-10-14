@@ -29,30 +29,61 @@ class DecideTests(unittest.TestCase):
     def setUp(self):
         self.cfg = config.load()
 
-    def test_new_position_gets_take_profit_and_alert(self):
-        out = decide(state(positions=[{"symbol": "AAOI", "quantity": 13, "avg_price": 109.9}]), self.cfg)
-        tp = [a for a in out["actions"] if a["type"] == "place_take_profit"][0]
-        self.assertEqual((tp["symbol"], tp["quantity"], tp["limit_price"]), ("AAOI", 13, 110.82))
-        alert = [a for a in out["actions"] if a["type"] == "create_price_alert"][0]
-        self.assertEqual(alert["threshold"], round(109.9 * 0.97, 2))
+    def test_new_position_gets_one_oco(self):
+        out = decide(state(positions=[{"symbol": "AAOI", "quantity": 16, "avg_price": 92.2082}]), self.cfg)
+        self.assertEqual(out["actions"], [{"type": "place_oco", "symbol": "AAOI", "quantity": 16,
+                                           "take_profit_limit_price": 92.98, "stop_loss_stop_price": 90.82,
+                                           "time_in_force": "gfd"}])
 
-    def test_existing_take_profit_is_left_alone(self):
+    def test_matching_oco_is_left_alone_and_its_legs_ignored(self):
+        oco = {"id": "x1", "symbol": "AAOI", "quantity": 16, "take_profit_price": 92.98, "stop_price": 90.82,
+               "leg_ids": ["l1", "l2"]}
+        legs = [{"id": l, "symbol": "AAOI", "side": "sell", "type": t, "quantity": 16}
+                for l, t in (("l1", "limit"), ("l2", "market"))]
+        s = state(positions=[{"symbol": "AAOI", "quantity": 16, "avg_price": 92.2082}], orders=legs)
+        s["oco_orders"] = [oco]
+        self.assertEqual(decide(s, self.cfg)["actions"], [])
+
+    def test_plain_take_profit_is_replaced_by_an_oco(self):
         out = decide(state(positions=[{"symbol": "AAOI", "quantity": 13, "avg_price": 109.9}],
                            orders=[{"id": "o1", "symbol": "AAOI", "side": "sell", "type": "limit",
                                     "quantity": 13, "limit_price": 110.82}]), self.cfg)
-        self.assertEqual(out["actions"], [])
+        self.assertEqual(types(out), ["cancel_order", "place_oco"])
 
-    def test_partial_take_profit_is_replaced(self):
+    def test_monitored_fallback(self):
+        s = state(positions=[{"symbol": "AAOI", "quantity": 15, "avg_price": 100.0}])  # bars close ~100
+        s["oco_unavailable"] = True
+        out = decide(s, self.cfg)
+        self.assertEqual(types(out), ["place_take_profit", "set_watch_stop"])
+        self.assertEqual(out["actions"][1]["stop_price"], 98.5)
+        # bars close around 100, far below the stop: sell now
+        s = state(positions=[{"symbol": "AAOI", "quantity": 13, "avg_price": 109.9}],
+                  orders=[{"id": "o1", "symbol": "AAOI", "side": "sell", "type": "limit", "quantity": 13,
+                           "limit_price": 110.82}])
+        s["oco_unavailable"] = True
+        out = decide(s, self.cfg)
+        self.assertIn("sell_market", types(out))
+
+    def test_take_profit_only_when_stop_disabled(self):
+        cfg = config.load(overrides={"exit": {"stop_loss": {"enabled": False}}})
+        out = decide(state(positions=[{"symbol": "AAOI", "quantity": 13, "avg_price": 109.9}]), cfg)
+        self.assertEqual(types(out), ["place_take_profit", "create_price_alert"])
         out = decide(state(positions=[{"symbol": "AAOI", "quantity": 13, "avg_price": 109.9}],
                            orders=[{"id": "o1", "symbol": "AAOI", "side": "sell", "type": "limit",
-                                    "quantity": 5, "limit_price": 110.82}]), self.cfg)
-        self.assertEqual(types(out), ["cancel_order", "place_take_profit"])
+                                    "quantity": 13, "limit_price": 110.82}]), cfg)
+        self.assertEqual(out["actions"], [])
 
     def test_end_of_day_cancels_and_sells_everything(self):
         out = decide(state(now_et="15:50", positions=[{"symbol": "SNDK", "quantity": 1, "avg_price": 1586.3}],
                            orders=[{"id": "o1", "symbol": "SNDK", "side": "sell", "type": "limit",
                                     "quantity": 1, "limit_price": 1599.47}]), self.cfg)
         self.assertEqual(types(out), ["cancel_order", "sell_market"])
+
+    def test_end_of_day_cancels_ocos_too(self):
+        s = state(now_et="15:50", positions=[{"symbol": "AAOI", "quantity": 16, "avg_price": 92.2}])
+        s["oco_orders"] = [{"id": "x1", "symbol": "AAOI", "quantity": 16, "take_profit_price": 92.98,
+                            "stop_price": 90.82, "leg_ids": []}]
+        self.assertEqual(types(decide(s, self.cfg)), ["cancel_oco", "sell_market"])
 
     @mock.patch("trader.live.decide.signals.is_entry", return_value=True)
     def test_signal_buys_at_the_ask_on_the_last_completed_bar(self, _):
