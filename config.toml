@@ -33,6 +33,9 @@ macd_signal = 9
 macd_min_cross_margin = 0.0   # TODO: > 0 ignores crosses that barely clear the signal line
 limit_price = "ask"           # "ask" (from quotes) or "last_close"
 buy_order_ttl_minutes = 2     # cancel an unfilled buy order after this many minutes
+forming_slack = 5             # decide.py reports "forming" (recheck next minute) when RSI and %K/%D are within this
+                              # of the limits and MACD is closing in; 0 missed ASTS 2026-10-16 13:14 ET (D was 20.8
+                              # one bar earlier). On past data: forming precedes 23/27 strict signals vs 19/27 at 0
 signal_lookback_bars = 1      # decide.py also accepts a signal on the bar before the last one (Claude
                               # may be woken a minute late); signals already handled are skipped
 

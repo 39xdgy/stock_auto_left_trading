@@ -121,10 +121,11 @@ class DecideTests(unittest.TestCase):
 
     def test_forming_setup_is_flagged(self):
         with mock.patch("trader.live.decide.signals.is_entry", return_value=False), \
-                mock.patch("trader.live.decide.signals.rsi_low", return_value=True), \
-                mock.patch("trader.live.decide.signals.kd_low", return_value=True), \
                 mock.patch("trader.live.decide.signals.compute") as compute:
             compute.return_value.hist = [0.0] * 88 + [-0.3, -0.1]
+            compute.return_value.rsi = [30.0] * 90
+            compute.return_value.k = [22.0] * 90   # above 20 but within forming_slack
+            compute.return_value.d = [20.8] * 90
             self.assertEqual(decide(state(), self.cfg)["forming"], ["AAOI", "SNDK", "ASTS"])
 
     def test_stale_buy_order_is_cancelled(self):

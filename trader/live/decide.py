@@ -161,8 +161,11 @@ def decide(state, cfg):
         hits = [j for j in range(len(b) - 1, len(b) - 2 - lookback, -1) if signals.is_entry(ind, j, cfg)]
         if not hits or f"{sym}@{b[hits[0]].ts}" in handled:
             j = len(b) - 1
-            if not hits and signals.rsi_low(ind, j, cfg) and signals.kd_low(ind, j, cfg) \
-                    and ind.hist[j] <= 0 and ind.hist[j] > ind.hist[j - 1]:
+            slack = getattr(cfg.entry, "forming_slack", 0)
+            e = cfg.entry
+            near = (ind.rsi[j] is not None and ind.rsi[j] < e.rsi_max + slack and ind.k[j] is not None
+                    and ind.d[j] is not None and ind.k[j] < e.stoch_max + slack and ind.d[j] < e.stoch_max + slack)
+            if not hits and near and ind.hist[j] <= 0 and ind.hist[j] > ind.hist[j - 1]:
                 forming.append(sym)  # oversold and MACD closing in: worth another look next minute
             continue
         i = hits[0]
