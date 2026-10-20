@@ -49,7 +49,7 @@ Alpaca 的免费 IEX 数据只占市场成交的一小部分，和 Robinhood 的
 1. `get_equity_historicals`：观察名单，`interval = "minute"`，`start_time` = 前一个交易日 ET 9:30，`bounds = "regular"`。结果很大时会存成文件：不要把内容读进对话，用 `--historicals 文件路径` 交给 decide（顺便复制一份到 `data/YYYY-MM-DD/` 留给日报）。
 2. 先只用行情跑一次 decide：`state.json` 里只放 `handled_signals`（取自 `journal/handled.json`）、`realized_pnl_today`、`earnings_today`，运行 `python3 -m trader.live.decide state.json --historicals 文件路径 --signals-only`（`now` 默认是当前时间；这一步不输出任何动作）。
    - `signals` 为空：看 `forming`（见第 7 步），否则回去等事件。不要多说话。
-3. 有信号时才补齐：`get_equity_quotes`、`get_equity_positions`、`get_equity_orders`（未成交的）、`get_advanced_orders`（未完成的 OCO，写成 `oco_orders`，包括每个 OCO 两条腿的订单号 `leg_ids`）、`buying_power`，写进 `state.json`，再跑一次 decide（去掉 `--signals-only`）。如果今天已经确定 OCO 用不了，加上 `"oco_unavailable": true`。
+3. 有信号时才补齐：`get_equity_quotes`、`get_equity_positions`、`get_equity_orders`（未成交的）、`get_advanced_orders`（`created_at_gte` 要用完整的 ISO 时间，比如 `2026-10-19T00:00:00Z`，只写日期会报 400；未完成的 OCO 写成 `oco_orders`，包括每个 OCO 两条腿的订单号 `leg_ids`）、`buying_power`，写进 `state.json`，再跑一次 decide（去掉 `--signals-only`）。如果今天已经确定 OCO 用不了，加上 `"oco_unavailable": true`。
 4. 把输出里的每个 `signals` 记进 journal，并把 `"SYMBOL@bar"` 加进 `journal/handled.json`（不管买没买，同一个信号只处理一次）。
 5. 立刻执行 `actions`（见下表），不要再去拉别的数据：信号是按分钟算的，晚一分钟就可能过了入场时间或价格。没有动作就回去等事件。
 6. 下了买单之后：`place_equity_order` 返回的状态是 `unconfirmed`、`queued` 或 `confirmed` 都是正常的过渡状态（订单已提交，交易所还没回报），**不是**要用户确认，不要停下来问。Agentic 账户的人工审批是关闭的（可以用 `get_trade_approval_setting` 核对）。接着用 Bash `run_in_background` 跑 `sleep 60`，醒来后重复第 1–5 步（这时直接做完整的第 3 步）（decide 会在成交后给出止盈单和价格提醒，超过 2 分钟没成交会给出撤单）。直到没有未成交的买单、每个仓位都有止盈单，再回去等事件。
